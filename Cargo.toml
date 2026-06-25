@@ -1,0 +1,14 @@
+[workspace]
+resolver = "3"
+members = ["vantage-core", "vantage-host", "vantage-viewer"]
+
+[workspace.package]
+edition = "2024"
+authors = ["Riley @ MHK Consultants"]
+
+[workspace.dependencies]
+vantage-core = { path = "vantage-core" }
+serde = { version = "1", features = ["derive"] }
+bincode = { version = "2", features = ["serde"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time"] }
+enigo = { version = "0.6.1", default-features = false, features = ["serde"] }

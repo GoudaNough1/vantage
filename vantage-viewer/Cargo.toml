@@ -1,0 +1,13 @@
+[package]
+name = "vantage-viewer"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+vantage-core = { workspace = true }
+tokio = { workspace = true }
+enigo = { workspace = true }
+openh264 = "0.9.3"
+softbuffer = "0.4.8"
+winit = "0.30.13"

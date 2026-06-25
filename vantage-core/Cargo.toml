@@ -1,0 +1,11 @@
+[package]
+name = "vantage-core"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+bincode = { workspace = true }
+tokio = { workspace = true }
+enigo = { workspace = true }
