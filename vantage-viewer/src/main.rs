@@ -20,6 +20,7 @@ use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key as WinitKey, NamedKey};
+use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::{Window, WindowId};
 use vantage_core::{Message, read_message, write_message};
 
@@ -264,34 +265,59 @@ fn map_scroll(delta: MouseScrollDelta) -> Option<Token> {
 	}
 }
 
+// Forward every key as a discrete press or release so modifiers stay held across a combo and held
+// keys repeat. key_without_modifiers gives the unshifted key, so enigo presses a clean virtual key:
+// Key::Unicode of a shifted character encodes the shift state into the vk and breaks on Windows. The
+// host re-applies Shift/Ctrl/Alt from the modifier keys, which are forwarded as their own events.
 fn map_key(event: &KeyEvent) -> Option<Token> {
-	if event.state != ElementState::Pressed {
-		return None;
-	}
-	match &event.logical_key {
-		WinitKey::Named(named) => {
-			let key = match named {
-				NamedKey::Enter => EnigoKey::Return,
-				NamedKey::Backspace => EnigoKey::Backspace,
-				NamedKey::Tab => EnigoKey::Tab,
-				NamedKey::Escape => EnigoKey::Escape,
-				NamedKey::Space => EnigoKey::Space,
-				NamedKey::Delete => EnigoKey::Delete,
-				NamedKey::ArrowUp => EnigoKey::UpArrow,
-				NamedKey::ArrowDown => EnigoKey::DownArrow,
-				NamedKey::ArrowLeft => EnigoKey::LeftArrow,
-				NamedKey::ArrowRight => EnigoKey::RightArrow,
-				NamedKey::Home => EnigoKey::Home,
-				NamedKey::End => EnigoKey::End,
-				NamedKey::PageUp => EnigoKey::PageUp,
-				NamedKey::PageDown => EnigoKey::PageDown,
-				_ => return None,
-			};
-			Some(Token::Key(key, Direction::Click))
-		}
-		WinitKey::Character(text) => Some(Token::Text(text.to_string())),
-		_ => None,
-	}
+	let direction = match event.state {
+		ElementState::Pressed => Direction::Press,
+		ElementState::Released => Direction::Release,
+	};
+	let key = match event.key_without_modifiers() {
+		WinitKey::Named(named) => named_key(named)?,
+		WinitKey::Character(text) => EnigoKey::Unicode(text.chars().next()?),
+		_ => return None,
+	};
+	Some(Token::Key(key, direction))
+}
+
+fn named_key(named: NamedKey) -> Option<EnigoKey> {
+	Some(match named {
+		NamedKey::Shift => EnigoKey::Shift,
+		NamedKey::Control => EnigoKey::Control,
+		NamedKey::Alt => EnigoKey::Alt,
+		NamedKey::Super => EnigoKey::Meta,
+		NamedKey::Enter => EnigoKey::Return,
+		NamedKey::Backspace => EnigoKey::Backspace,
+		NamedKey::Tab => EnigoKey::Tab,
+		NamedKey::Escape => EnigoKey::Escape,
+		NamedKey::Space => EnigoKey::Space,
+		NamedKey::Delete => EnigoKey::Delete,
+		NamedKey::Insert => EnigoKey::Insert,
+		NamedKey::ArrowUp => EnigoKey::UpArrow,
+		NamedKey::ArrowDown => EnigoKey::DownArrow,
+		NamedKey::ArrowLeft => EnigoKey::LeftArrow,
+		NamedKey::ArrowRight => EnigoKey::RightArrow,
+		NamedKey::Home => EnigoKey::Home,
+		NamedKey::End => EnigoKey::End,
+		NamedKey::PageUp => EnigoKey::PageUp,
+		NamedKey::PageDown => EnigoKey::PageDown,
+		NamedKey::CapsLock => EnigoKey::CapsLock,
+		NamedKey::F1 => EnigoKey::F1,
+		NamedKey::F2 => EnigoKey::F2,
+		NamedKey::F3 => EnigoKey::F3,
+		NamedKey::F4 => EnigoKey::F4,
+		NamedKey::F5 => EnigoKey::F5,
+		NamedKey::F6 => EnigoKey::F6,
+		NamedKey::F7 => EnigoKey::F7,
+		NamedKey::F8 => EnigoKey::F8,
+		NamedKey::F9 => EnigoKey::F9,
+		NamedKey::F10 => EnigoKey::F10,
+		NamedKey::F11 => EnigoKey::F11,
+		NamedKey::F12 => EnigoKey::F12,
+		_ => return None,
+	})
 }
 
 // === Network and decode ===
