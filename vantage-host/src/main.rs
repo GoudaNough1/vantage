@@ -14,6 +14,7 @@ use openh264::encoder::{Encoder, EncoderConfig, FrameRate, UsageType};
 use openh264::formats::{BgraSliceU8, YUVBuffer};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
+use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
 use vantage_core::{Message, read_message, write_message};
 
 const LISTEN_ADDR: &str = "0.0.0.0:9000";
@@ -22,6 +23,8 @@ const TARGET_FPS: u32 = 30;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+	make_dpi_aware();
+
 	let listener = TcpListener::bind(LISTEN_ADDR).await?;
 	println!("vantage-host: listening on {LISTEN_ADDR}, waiting for a viewer...");
 
@@ -30,6 +33,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
 		println!("vantage-host: viewer connected from {peer}");
 		serve_viewer(socket).await;
 		println!("vantage-host: viewer gone, waiting for the next one...");
+	}
+}
+
+fn make_dpi_aware() {
+	// scap captures physical pixels, but enigo maps absolute mouse moves against GetSystemMetrics,
+	// which reports virtualized (scaled) dimensions to a DPI-unaware process. Per-monitor awareness
+	// makes GetSystemMetrics return physical pixels so the two coordinate spaces agree.
+	unsafe {
+		SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	}
 }
 

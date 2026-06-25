@@ -10,3 +10,4 @@ tokio = { workspace = true }
 enigo = { workspace = true }
 openh264 = "0.9.3"
 scap = "0.0.8"
+windows-sys = { version = "0.61", features = ["Win32_UI_HiDpi"] }
