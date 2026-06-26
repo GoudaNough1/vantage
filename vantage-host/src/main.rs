@@ -15,7 +15,7 @@ use scap::frame::{Frame, FrameType};
 use openh264::OpenH264API;
 use openh264::Timestamp;
 use openh264::encoder::{Complexity, Encoder, EncoderConfig, FrameRate, UsageType};
-use openh264::formats::{BgraSliceU8, YUVBuffer};
+use openh264::formats::{RgbSliceU8, YUVBuffer};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
@@ -217,6 +217,7 @@ fn encode_loop(handoff: &Handoff, tx: &mpsc::Sender<Message>) -> Result<(), Box<
 
 	let mut announced = false;
 	let mut last_hash: Option<u64> = None;
+	let mut rgb: Vec<u8> = Vec::new();
 	while let Some(frame) = handoff.take() {
 		if !announced {
 			if tx.blocking_send(Message::Hello { width: frame.width, height: frame.height }).is_err() {
@@ -231,8 +232,10 @@ fn encode_loop(handoff: &Handoff, tx: &mpsc::Sender<Message>) -> Result<(), Box<
 		}
 		last_hash = Some(hash);
 
-		let source = BgraSliceU8::new(&frame.data, (frame.width as usize, frame.height as usize));
-		let yuv = YUVBuffer::from_rgb_source(source);
+		let (width, height) = (frame.width as usize, frame.height as usize);
+		rgb.resize(width * height * 3, 0);
+		bgra_to_rgb(&frame.data, &mut rgb);
+		let yuv = YUVBuffer::from_rgb8_source(RgbSliceU8::new(&rgb, (width, height)));
 		let timestamp = Timestamp::from_millis(start.elapsed().as_millis() as u64);
 		let encoded = encoder.encode_at(&yuv, timestamp)?.to_vec();
 		if tx.blocking_send(Message::Frame(encoded)).is_err() {
@@ -241,6 +244,16 @@ fn encode_loop(handoff: &Handoff, tx: &mpsc::Sender<Message>) -> Result<(), Box<
 	}
 
 	Ok(())
+}
+
+// Repack scap's BGRA into the tightly packed RGB that openh264's from_rgb8_source expects: a chunked
+// byte shuffle dropping alpha and swapping B/R, far cheaper than the per-pixel from_rgb_source path.
+fn bgra_to_rgb(bgra: &[u8], rgb: &mut [u8]) {
+	for (src, dst) in bgra.chunks_exact(4).zip(rgb.chunks_exact_mut(3)) {
+		dst[0] = src[2];
+		dst[1] = src[1];
+		dst[2] = src[0];
+	}
 }
 
 // Cheap change detector: FNV-1a over a sampled subset of the BGRA bytes. Catches typing and UI
