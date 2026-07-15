@@ -12,12 +12,9 @@ use enigo::agent::{Agent, Token};
 use enigo::{Enigo, Settings};
 use scap::capturer::{Capturer, Options, Resolution};
 use scap::frame::{Frame, FrameType};
-use openh264::OpenH264API;
-use openh264::Timestamp;
-use openh264::encoder::{Complexity, Encoder, EncoderConfig, FrameRate, UsageType};
-use openh264::formats::{RgbSliceU8, YUVBuffer};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
+use vantage_host::encoder::{BgraFrame, create_encoder};
 use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
 use vantage_core::{Message, read_message, write_message};
 
@@ -207,23 +204,16 @@ fn capture_loop(handoff: &Handoff) -> Result<(), Box<dyn Error>> {
 }
 
 fn encode_loop(handoff: &Handoff, tx: &mpsc::Sender<Message>) -> Result<(), Box<dyn Error>> {
-	let config = EncoderConfig::new()
-		.max_frame_rate(FrameRate::from_hz(TARGET_FPS as f32))
-		.usage_type(UsageType::ScreenContentRealTime)
-		.complexity(Complexity::Low)
-		.skip_frames(false);
-	let mut encoder = Encoder::with_api_config(OpenH264API::from_source(), config)?;
 	let start = Instant::now();
 
-	let mut announced = false;
+	let mut encoder = None;
 	let mut last_hash: Option<u64> = None;
-	let mut rgb: Vec<u8> = Vec::new();
 	while let Some(frame) = handoff.take() {
-		if !announced {
+		if encoder.is_none() {
 			if tx.blocking_send(Message::Hello { width: frame.width, height: frame.height }).is_err() {
 				break;
 			}
-			announced = true;
+			encoder = Some(create_encoder(frame.width, frame.height, TARGET_FPS));
 		}
 
 		let hash = frame_hash(&frame.data);
@@ -232,28 +222,21 @@ fn encode_loop(handoff: &Handoff, tx: &mpsc::Sender<Message>) -> Result<(), Box<
 		}
 		last_hash = Some(hash);
 
-		let (width, height) = (frame.width as usize, frame.height as usize);
-		rgb.resize(width * height * 3, 0);
-		bgra_to_rgb(&frame.data, &mut rgb);
-		let yuv = YUVBuffer::from_rgb8_source(RgbSliceU8::new(&rgb, (width, height)));
-		let timestamp = Timestamp::from_millis(start.elapsed().as_millis() as u64);
-		let encoded = encoder.encode_at(&yuv, timestamp)?.to_vec();
-		if tx.blocking_send(Message::Frame(encoded)).is_err() {
+		let active_encoder = encoder.as_mut().ok_or("encoder missing after initialization")?;
+		let encoded = active_encoder.encode(
+			BgraFrame {
+				width: frame.width,
+				height: frame.height,
+				data: &frame.data,
+			},
+			start.elapsed().as_millis() as u64,
+		)?;
+		if !encoded.is_empty() && tx.blocking_send(Message::Frame(encoded)).is_err() {
 			break;
 		}
 	}
 
 	Ok(())
-}
-
-// Repack scap's BGRA into the tightly packed RGB that openh264's from_rgb8_source expects: a chunked
-// byte shuffle dropping alpha and swapping B/R, far cheaper than the per-pixel from_rgb_source path.
-fn bgra_to_rgb(bgra: &[u8], rgb: &mut [u8]) {
-	for (src, dst) in bgra.chunks_exact(4).zip(rgb.chunks_exact_mut(3)) {
-		dst[0] = src[2];
-		dst[1] = src[1];
-		dst[2] = src[0];
-	}
 }
 
 // Cheap change detector: FNV-1a over a sampled subset of the BGRA bytes. Catches typing and UI
